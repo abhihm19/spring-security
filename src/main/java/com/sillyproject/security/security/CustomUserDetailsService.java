@@ -1,7 +1,12 @@
 package com.sillyproject.security.security;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.stream.Collectors;
 
+import com.sillyproject.security.entity.Role;
+import com.sillyproject.security.repository.UserRoleRepository;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -15,9 +20,11 @@ import com.sillyproject.security.repository.UserRepository;
 public class CustomUserDetailsService implements UserDetailsService {
 
 	private UserRepository userRepository;
+	private UserRoleRepository userRoleRepository;
 	
-	public CustomUserDetailsService(UserRepository userRepository) {
+	public CustomUserDetailsService(UserRepository userRepository, UserRoleRepository userRoleRepository) {
 		this.userRepository = userRepository;
+		this.userRoleRepository = userRoleRepository;
 	}
 
 	@Override
@@ -25,13 +32,17 @@ public class CustomUserDetailsService implements UserDetailsService {
 		User user = userRepository.findByUsernameOrEmail(usernameOrEmail, usernameOrEmail)
 			.orElseThrow(() -> new UsernameNotFoundException("User not found with username or email: " + usernameOrEmail));
 
+		List<String> activeRoles = userRoleRepository.findActiveRolesByUsername(user.getUsername(), LocalDate.now());
+
+		List<GrantedAuthority> authorities = activeRoles.stream()
+				.map(role -> new SimpleGrantedAuthority(role))
+				.collect(Collectors.toList());
+
+
 		return new org.springframework.security.core.userdetails.User(
         		user.getUsername(),
         		user.getPassword(),
-                user.getRoles()
-                	.stream()
-                    .map((role) -> new SimpleGrantedAuthority(role.getName()))
-                    .collect(Collectors.toList())
+				authorities
                 );
 	}
 

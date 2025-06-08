@@ -1,16 +1,13 @@
 package com.sillyproject.security.entity;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Getter
@@ -24,19 +21,14 @@ public class Role {
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private long id;
 	private String name;
-	private LocalDateTime effectiveStartDate;
-	private LocalDateTime effectiveEndDate;
+	private boolean isActive;
+
+	@OneToMany(mappedBy = "role", cascade = CascadeType.ALL, orphanRemoval = true)
+	private List<UserRole> roleMappings;
 
 	private int createdBy;
 	private LocalDateTime creationDate;
 	private int lastUpdatedBy;
 	private LocalDateTime lastUpdatedDate;
 
-	@Override
-	public String toString() {
-		return "Role{" +
-				"id=" + id +
-				", name='" + name + '\'' +
-				'}';
-	}
 }
