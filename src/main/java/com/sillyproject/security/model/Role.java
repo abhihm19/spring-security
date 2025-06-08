@@ -23,4 +23,11 @@ public class Role {
 	private long id;
 	private String name;
 
+	@Override
+	public String toString() {
+		return "Role{" +
+				"id=" + id +
+				", name='" + name + '\'' +
+				'}';
+	}
 }

@@ -28,6 +28,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		this.userDetailsService = userDetailsService;
 	}
 
+	@Override
+	protected boolean shouldNotFilter(HttpServletRequest request) {
+		String path = request.getServletPath();
+		return path.startsWith("/api/auth");
+	}
+
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -54,7 +60,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			
 			SecurityContextHolder.getContext().setAuthentication(authenticationToken);
 		}
-		
+		System.out.println("SecurityContext auth = " + SecurityContextHolder.getContext().getAuthentication());
+
 		filterChain.doFilter(request, response);
 	}
 	

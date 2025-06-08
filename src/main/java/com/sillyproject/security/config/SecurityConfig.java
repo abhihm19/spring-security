@@ -43,10 +43,11 @@ public class SecurityConfig {
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http.csrf(csrf -> csrf.disable())
-				.authorizeHttpRequests(authorize -> authorize.requestMatchers(HttpMethod.GET,
-						"/public_route"
-						).permitAll()
-						.anyRequest().authenticated())
+				.authorizeHttpRequests(authorize -> authorize
+						.requestMatchers(HttpMethod.GET,"/public_route").permitAll()
+						.requestMatchers("/api/auth/**").permitAll()
+						.anyRequest()
+						.authenticated())
 				.exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 

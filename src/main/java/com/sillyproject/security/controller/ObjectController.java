@@ -1,5 +1,6 @@
 package com.sillyproject.security.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -10,15 +11,17 @@ public class ObjectController {
 	public String publicMethod() {
 		return "Public api endpoint";
 	}
-	
-	@GetMapping("/role1")
+
+	@PreAuthorize("hasRole('ADMIN')")
+	@GetMapping("/admin")
 	public String role1() {
-		return "Role1 api endpoint";
+		return "Admin api endpoint";
 	}
-	
-	@GetMapping("/role2")
+
+	@PreAuthorize("hasRole('USER')")
+	@GetMapping("/user")
 	public String role2() {
-		return "Role2 api endpoint";
+		return "User api endpoint";
 	}
 
 }

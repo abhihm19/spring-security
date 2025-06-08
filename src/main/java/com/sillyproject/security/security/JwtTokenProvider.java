@@ -5,7 +5,10 @@ import java.util.Date;
 
 import javax.crypto.SecretKey;
 
+import io.jsonwebtoken.JwtException;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import io.jsonwebtoken.Jwts;
@@ -52,20 +55,36 @@ public class JwtTokenProvider {
 	}
 	
 	//validate jwt token
-	public static boolean validateToken(String token, UserDetails userDetails) {
-		final String username = getUsername(token);
-        return (username.equals(userDetails.getUsername()) && !isTokenExpired(token)); 
+	public static boolean validateToken(String token) {
+		try {
+			Jwts.parser()
+					.verifyWith((SecretKey) key())
+					.build()
+					.parseSignedClaims(token);
+			return !isTokenExpired(token);
+		} catch (Exception e) {
+			return false;
+		}
 	}
 
 	private static boolean isTokenExpired(String token) {
-		// TODO Auto-generated method stub
-		return false;
+		Date expiration = Jwts.parser()
+				.verifyWith((SecretKey) key())
+				.build()
+				.parseSignedClaims(token)
+				.getPayload()
+				.getExpiration();
+
+		return expiration.before(new Date());
 	}
 	
-//	public static void main(String[] args) {
-//		String token = generateToken("Abhi");
-//		System.out.println(token);
-//		System.out.println(getUsername(token));
-//		System.out.println(validateToken(token));
-//	}
+	public static void main(String[] args) {
+		String token = generateToken("Abhi");
+		System.out.println(token);
+		System.out.println(getUsername(token));
+		System.out.println(validateToken(token));
+
+		PasswordEncoder passwordEncoder =  new BCryptPasswordEncoder();
+		System.out.println(passwordEncoder.encode("1234"));
+	}
 }
