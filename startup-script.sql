@@ -17,15 +17,16 @@ CREATE TABLE `users` (
 
 -- `security`.roles definition
 
+-- `security`.roles definition
+
 CREATE TABLE `roles` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `name` varchar(255) DEFAULT NULL,
   `created_by` int NOT NULL,
   `creation_date` datetime(6) DEFAULT NULL,
-  `effective_end_date` datetime(6) DEFAULT NULL,
-  `effective_start_date` datetime(6) DEFAULT NULL,
   `last_updated_by` int NOT NULL,
   `last_updated_date` datetime(6) DEFAULT NULL,
+  `is_active` bit(1) NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -35,6 +36,12 @@ CREATE TABLE `users_roles` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `user_id` bigint NOT NULL,
   `role_id` bigint NOT NULL,
+  `effective_end_date` datetime(6) NOT NULL,
+  `effective_start_date` datetime(6) NOT NULL,
+  `created_by` int NOT NULL,
+  `creation_date` datetime(6) DEFAULT NULL,
+  `last_updated_by` int NOT NULL,
+  `last_updated_date` datetime(6) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `FKj6m8fwv7oqv74fcehir1a9ffy` (`role_id`),
   KEY `FK2o0jvgh89lemvvo17cbqvdxaa` (`user_id`),
