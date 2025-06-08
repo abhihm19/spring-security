@@ -43,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		String token = getTokenFromRequest(request);
 		
 		//validate token
-		if(StringUtils.hasText(token) && jwtTokenProvider.validateToken(token) ) {
+		if(StringUtils.hasText(token) && jwtTokenProvider.validateToken(token,  "access") ) {
 			
 			//get username from token
 			String username = jwtTokenProvider.getUsername(token);
@@ -60,7 +60,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			
 			SecurityContextHolder.getContext().setAuthentication(authenticationToken);
 		}
-		System.out.println("SecurityContext auth = " + SecurityContextHolder.getContext().getAuthentication());
 
 		filterChain.doFilter(request, response);
 	}
