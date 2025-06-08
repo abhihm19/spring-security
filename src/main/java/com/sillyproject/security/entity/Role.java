@@ -1,4 +1,4 @@
-package com.sillyproject.security.model;
+package com.sillyproject.security.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -9,6 +9,8 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
@@ -22,6 +24,13 @@ public class Role {
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private long id;
 	private String name;
+	private LocalDateTime effectiveStartDate;
+	private LocalDateTime effectiveEndDate;
+
+	private int createdBy;
+	private LocalDateTime creationDate;
+	private int lastUpdatedBy;
+	private LocalDateTime lastUpdatedDate;
 
 	@Override
 	public String toString() {

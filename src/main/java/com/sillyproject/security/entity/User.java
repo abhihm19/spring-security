@@ -1,5 +1,6 @@
-package com.sillyproject.security.model;
+package com.sillyproject.security.entity;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 
 import jakarta.persistence.CascadeType;
@@ -44,6 +45,11 @@ public class User {
 			inverseJoinColumns = @JoinColumn( name = "role_id", referencedColumnName = "id")
 			)
 	private Collection<Role> roles;
+
+	private int createdBy;
+	private LocalDateTime creationDate;
+	private int lastUpdatedBy;
+	private LocalDateTime lastUpdatedDate;
 
 	@Override
 	public String toString() {

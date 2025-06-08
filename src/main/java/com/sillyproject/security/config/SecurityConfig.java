@@ -44,8 +44,8 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http.csrf(csrf -> csrf.disable())
 				.authorizeHttpRequests(authorize -> authorize
-						.requestMatchers(HttpMethod.GET,"/public_route").permitAll()
-						.requestMatchers("/api/auth/**").permitAll()
+						.requestMatchers(HttpMethod.GET,"/api/v1/public_route").permitAll()
+						.requestMatchers("/api/v1/auth/**").permitAll()
 						.anyRequest()
 						.authenticated())
 				.exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
