@@ -35,8 +35,11 @@ public class UserRole {
     private LocalDateTime effectiveEndDate;
 
     private int createdBy;
+
     private LocalDateTime creationDate;
+
     private int lastUpdatedBy;
+    
     private LocalDateTime lastUpdatedDate;
 
 }
