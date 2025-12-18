@@ -2,6 +2,7 @@ package com.sillyproject.security.controller;
 
 import com.sillyproject.security.pojo.LoginRequest;
 import com.sillyproject.security.pojo.LoginResponse;
+import com.sillyproject.security.pojo.TokenRefreshResponse;
 import com.sillyproject.security.service.AuthService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -12,7 +13,6 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Collections;
-import java.util.Map;
 
 @RestController
 @Validated
@@ -45,8 +45,8 @@ public class AuthController {
     @PostMapping("/refresh-token")
     public ResponseEntity<?> refreshToken(@RequestHeader("Refresh-Token") @NotBlank(message = "Refresh-Token header is required") String refreshToken) {
         try {
-            String newAccessToken = authService.refreshAccessToken(refreshToken);
-            return ResponseEntity.ok(Map.of("accessToken", newAccessToken));
+            TokenRefreshResponse tokens = authService.refreshAccessToken(refreshToken);
+            return ResponseEntity.ok(tokens);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Collections.singletonMap("error", e.getMessage() != null ? e.getMessage() : "Invalid refresh token"));

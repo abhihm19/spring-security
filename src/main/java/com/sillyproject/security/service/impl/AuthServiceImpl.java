@@ -7,11 +7,13 @@ import com.sillyproject.security.entity.UserRole;
 import com.sillyproject.security.pojo.LoginRequest;
 import com.sillyproject.security.pojo.LoginResponse;
 import com.sillyproject.security.pojo.SignupRequest;
+import com.sillyproject.security.pojo.TokenRefreshResponse;
 import com.sillyproject.security.repository.RefreshTokenRepository;
 import com.sillyproject.security.repository.RoleRepository;
 import com.sillyproject.security.repository.UserRepository;
 import com.sillyproject.security.repository.UserRoleRepository;
 import com.sillyproject.security.security.JwtTokenProvider;
+import com.sillyproject.security.security.TokenHashingService;
 import com.sillyproject.security.service.AuthService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -43,6 +45,7 @@ public class AuthServiceImpl implements AuthService {
     private PasswordEncoder passwordEncoder;
     private RoleRepository roleRepository;
     private UserRoleRepository userRoleRepository;
+    private TokenHashingService tokenHashingService;
 
     public AuthServiceImpl(AuthenticationManager authenticationManager,
                            JwtTokenProvider jwtTokenProvider,
@@ -50,7 +53,8 @@ public class AuthServiceImpl implements AuthService {
                            UserRepository userRepository,
                            PasswordEncoder passwordEncoder,
                            RoleRepository roleRepository,
-                           UserRoleRepository userRoleRepository) {
+                           UserRoleRepository userRoleRepository,
+                           TokenHashingService tokenHashingService) {
         this.authenticationManager = authenticationManager;
         this.jwtTokenProvider = jwtTokenProvider;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -58,6 +62,7 @@ public class AuthServiceImpl implements AuthService {
         this.passwordEncoder = passwordEncoder;
         this.roleRepository = roleRepository;
         this.userRoleRepository = userRoleRepository;
+        this.tokenHashingService = tokenHashingService;
     }
 
     @Override
@@ -101,14 +106,15 @@ public class AuthServiceImpl implements AuthService {
     private RefreshToken buildRefreshTokenObject(String token, User user) {
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setUser(user);
-        refreshToken.setToken(token);
+        refreshToken.setTokenHash(tokenHashingService.hash(token));
+        refreshToken.setJti(jwtTokenProvider.getJti(token));
         refreshToken.setCreatedAt(new Date());
         refreshToken.setExpiryDate(jwtTokenProvider.getExpirationDate(token));
         return refreshToken;
     }
 
     @Override
-    public String refreshAccessToken(String refreshToken) throws Exception {
+    public TokenRefreshResponse refreshAccessToken(String refreshToken) throws Exception {
         log.debug("Refresh token request received");
 
         if (!jwtTokenProvider.validateToken(refreshToken, "refresh")) {
@@ -117,9 +123,10 @@ public class AuthServiceImpl implements AuthService {
         }
 
         String username = jwtTokenProvider.getUsername(refreshToken);
+        String refreshTokenHash = tokenHashingService.hash(refreshToken);
 
         // Validate refresh token exists in database and is not revoked
-        Optional<RefreshToken> refreshTokenEntity = refreshTokenRepository.findByToken(refreshToken);
+        Optional<RefreshToken> refreshTokenEntity = refreshTokenRepository.findByTokenHash(refreshTokenHash);
         if (refreshTokenEntity.isEmpty() || refreshTokenEntity.get().isRevoked()) {
             log.warn("Invalid or revoked refresh token for user: {}", username);
             throw new Exception("Invalid or revoked refresh token");
@@ -131,18 +138,33 @@ public class AuthServiceImpl implements AuthService {
             throw new Exception("Token does not belong to user");
         }
 
-        // Generate new access token using the username (not principal.toString())
+        // Rotate refresh token on every successful refresh:
+        // - revoke the presented refresh token
+        // - mint a new refresh token and persist its hash
+        RefreshToken current = refreshTokenEntity.get();
+        current.setRevoked(true);
+        current.setRevokedAt(new Date());
+        refreshTokenRepository.save(current);
+
         String newAccessToken = jwtTokenProvider.generateAccessToken(username);
-        log.info("New access token generated for user: {}", username);
-        return newAccessToken;
+        String newRefreshToken = jwtTokenProvider.generateRefreshToken(username);
+
+        User user = current.getUser();
+        RefreshToken newRefreshEntity = buildRefreshTokenObject(newRefreshToken, user);
+        refreshTokenRepository.save(newRefreshEntity);
+
+        log.info("Rotated refresh token and generated new access token for user: {}", username);
+        return new TokenRefreshResponse(newAccessToken, newRefreshToken);
     }
 
     @Override
     public void logoutSingleSession(String refreshToken) {
-        Optional<RefreshToken> tokenEntity = refreshTokenRepository.findByToken(refreshToken);
+        String refreshTokenHash = tokenHashingService.hash(refreshToken);
+        Optional<RefreshToken> tokenEntity = refreshTokenRepository.findByTokenHash(refreshTokenHash);
         if (tokenEntity.isPresent()) {
             RefreshToken token = tokenEntity.get();
             token.setRevoked(true);
+            token.setRevokedAt(new Date());
             refreshTokenRepository.save(token);
             log.info("Session revoked for user: {}", token.getUser().getUsername());
         } else {

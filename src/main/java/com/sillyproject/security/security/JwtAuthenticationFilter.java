@@ -41,11 +41,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		String method = request.getMethod();
 		log.debug("JWT Filter - Processing request: {} {}", method, requestPath);
 		
-		// Defensive: ensure no authentication "leaks" between requests/threads
-		SecurityContextHolder.clearContext();
-		
-		boolean isPublicEndpoint = isPublicEndpoint(requestPath, method);
-		
 		//get jwt token from http request
 		String token = getTokenFromRequest(request);
 		
@@ -60,18 +55,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		log.debug("JWT Filter - Token found, validating...");
 		
 		try {
-			// validate token (signature/type/expiry)
+
 			if (!jwtTokenProvider.validateToken(token, "access")) {
-				log.warn("JWT Filter - Token validation failed for request: {} {}", method, requestPath);
-				
-				// For public endpoints: ignore invalid token and proceed unauthenticated
-				if (isPublicEndpoint) {
-					filterChain.doFilter(request, response);
-					return;
-				}
-				
-				// For protected endpoints: reject immediately
-				response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid or expired access token");
+				log.debug("JWT Filter - Invalid/expired access token for request: {} {}", method, requestPath);
+				SecurityContextHolder.clearContext();
+				filterChain.doFilter(request, response);
 				return;
 			}
 			
@@ -79,12 +67,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			
 			// get username from token (parser verifies signature again)
 			String username = jwtTokenProvider.getUsername(token);
-			log.info("JWT Filter - Extracted username from token: {}", username);
 			
 			UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-			log.info("JWT Filter - Loaded user details for: {}, authorities: {}", 
-				userDetails.getUsername(), 
-				userDetails.getAuthorities());
+			log.debug("JWT Filter - Loaded user details for: {}", userDetails.getUsername());
 			
 			UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(
 					userDetails,
@@ -95,41 +80,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			authenticationToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 			
 			SecurityContextHolder.getContext().setAuthentication(authenticationToken);
-			log.info("JWT Filter - Authentication set in SecurityContext for user: {} with authorities: {}", 
-				username, 
-				userDetails.getAuthorities());
+			log.debug("JWT Filter - Authentication set in SecurityContext for user: {}", username);
 				
 		} catch (Exception ex) {
-			// For invalid/malformed/tampered tokens, log and clear any existing authentication
-			log.error("JWT Filter - Token processing failed for {} {}: {}", method, requestPath, ex.getMessage());
-			log.debug("JWT Filter - Full exception details:", ex);
-			
-			// Clear any authentication that might have been set
+			// For invalid/malformed/tampered tokens, clear any existing authentication and proceed.
+			// Protected endpoints will be rejected later by Spring Security.
+			log.debug("JWT Filter - Token processing failed for {} {}: {}", method, requestPath, ex.getMessage());
 			SecurityContextHolder.clearContext();
-			if (isPublicEndpoint) {
-				// Ignore and proceed unauthenticated
-				filterChain.doFilter(request, response);
-				return;
-			}
-			response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid access token");
+			filterChain.doFilter(request, response);
 			return;
 		}
 
 		filterChain.doFilter(request, response);
 	}
 	
-	private boolean isPublicEndpoint(String path, String method) {
-		if (path == null) return false;
-		if (path.startsWith("/api/v1/auth/")) return true;
-		return "GET".equalsIgnoreCase(method) && "/api/v1/public_route".equals(path);
-	}
-	
 	private String getTokenFromRequest(HttpServletRequest request) {
 		
 		String bearerToken = request.getHeader("Authorization");
 		
-		if(StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
-			return bearerToken.substring(7, bearerToken.length());
+		if (StringUtils.hasText(bearerToken) && bearerToken.regionMatches(true, 0, "Bearer ", 0, 7)) {
+			return bearerToken.substring(7);
 		}
 		return null;
 	}

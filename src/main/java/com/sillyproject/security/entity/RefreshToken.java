@@ -11,7 +11,7 @@ import java.util.Date;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "refresh_tokens", uniqueConstraints = {
-        @UniqueConstraint(columnNames = "token")
+        @UniqueConstraint(columnNames = "token_hash")
 })
 public class RefreshToken {
 
@@ -23,8 +23,15 @@ public class RefreshToken {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "token", nullable = false, length = 512, unique = true)
-    private String token;
+
+    @Column(name = "token_hash", nullable = false, length = 128, unique = true)
+    private String tokenHash;
+
+    /**
+     * JWT ID (jti) claim of the refresh token. Useful for audit/rotation/reuse detection.
+     */
+    @Column(name = "jti", nullable = false, length = 64)
+    private String jti;
 
     @Column(name = "expiry_date", nullable = false)
     private Date expiryDate;
@@ -34,4 +41,7 @@ public class RefreshToken {
 
     @Column(name = "revoked")
     private boolean revoked = false;
+
+    @Column(name = "revoked_at")
+    private Date revokedAt;
 }

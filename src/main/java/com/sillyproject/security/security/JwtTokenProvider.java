@@ -2,6 +2,7 @@ package com.sillyproject.security.security;
 
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
+import java.util.UUID;
 import java.util.Date;
 import java.util.Base64;
 
@@ -44,6 +45,7 @@ public class JwtTokenProvider {
 		return Jwts.builder()
 				.subject(username)
 				.claim("type", "refresh")
+				.id(UUID.randomUUID().toString())
 				.issuedAt(new Date())
 				.expiration(new Date(System.currentTimeMillis() + refreshTokenValidity))
 				.signWith(key())
@@ -56,13 +58,7 @@ public class JwtTokenProvider {
 
 	public String getUsername(String token) {
 		try {
-			SecretKey key = (SecretKey) key();
-			return Jwts.parser()
-					.verifyWith(key)
-					.build()
-					.parseSignedClaims(token)
-					.getPayload()
-					.getSubject();
+			return parseClaims(token).getSubject();
 		} catch (io.jsonwebtoken.security.SignatureException ex) {
 			log.error("Token signature verification failed - token may be tampered");
 			throw ex;
@@ -82,6 +78,18 @@ public class JwtTokenProvider {
 			log.error("Unexpected error parsing token: {}", ex.getMessage());
 			throw new io.jsonwebtoken.security.SecurityException("Invalid token", ex);
 		}
+	}
+
+	public String getJti(String token) {
+		try {
+			return parseClaims(token).getId();
+		} catch (Exception ex) {
+			throw ex;
+		}
+	}
+
+	public Date getExpirationDate(String token) {
+		return parseClaims(token).getExpiration();
 	}
 
 	public boolean validateToken(String token, String expectedType) {
@@ -117,11 +125,7 @@ public class JwtTokenProvider {
 		
 		try {
 			// Parse and verify signature - this will throw exception if signature doesn't match
-			Claims claims = Jwts.parser()
-					.verifyWith((SecretKey) key())
-					.build()
-					.parseSignedClaims(token)
-					.getPayload();
+			Claims claims = parseClaims(token);
 
 			String tokenType = claims.get("type", String.class);
 			boolean isValid = tokenType != null && tokenType.equals(expectedType) && !isTokenExpired(claims);
@@ -173,15 +177,12 @@ public class JwtTokenProvider {
 			return claims.getExpiration().before(new Date());
 	}
 
-	public Date getExpirationDate(String token) {
-
-		Claims claims = Jwts.parser()
+	private Claims parseClaims(String token) {
+		return Jwts.parser()
 				.verifyWith((SecretKey) key())
 				.build()
 				.parseSignedClaims(token)
 				.getPayload();
-
-		return claims.getExpiration();
 	}
 
 }
