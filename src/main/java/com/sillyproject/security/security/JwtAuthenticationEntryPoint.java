@@ -35,10 +35,9 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint{
 		String method = request.getMethod();
 		String authHeader = request.getHeader("Authorization");
 		
-		log.error("AuthenticationEntryPoint triggered - {} {} - Error: {} - Auth Header present: {}", 
+		log.warn("AuthenticationEntryPoint triggered - {} {} - Auth Header present: {}", 
 			method, 
 			requestPath, 
-			authException.getMessage(),
 			authHeader != null);
 		
 		log.debug("Full authentication exception details:", authException);
@@ -55,7 +54,8 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint{
 		body.put("timestamp", Instant.now().toString());
 		body.put("status", 401);
 		body.put("error", "Unauthorized");
-		body.put("message", authException.getMessage());
+		// Do not leak authentication exception details to clients.
+		body.put("message", "Unauthorized");
 		body.put("path", requestPath);
 		body.put("method", method);
 

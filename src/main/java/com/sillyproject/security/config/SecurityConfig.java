@@ -2,10 +2,12 @@ package com.sillyproject.security.config;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -29,12 +31,16 @@ import com.sillyproject.security.security.JwtAuthenticationFilter;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-	private JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
-	private JwtAuthenticationFilter jwtAuthenticationFilter;
+	private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+	private final JwtAuthenticationFilter jwtAuthenticationFilter;
+	private final String allowedOriginPatternsProp;
 
-	public SecurityConfig(JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint, JwtAuthenticationFilter jwtAuthenticationFilter) {
+	public SecurityConfig(JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint,
+			JwtAuthenticationFilter jwtAuthenticationFilter,
+			@Value("${app.cors.allowed-origin-patterns:}") String allowedOriginPatternsProp) {
 		this.jwtAuthenticationEntryPoint = jwtAuthenticationEntryPoint;
 		this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+		this.allowedOriginPatternsProp = allowedOriginPatternsProp;
 	}
 
 	@Bean
@@ -54,8 +60,12 @@ public class SecurityConfig {
 				.authorizeHttpRequests(authorize -> authorize
 						// allow browser preflight requests
 						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+						.requestMatchers(HttpMethod.GET, "/.well-known/jwks.json", "/.well-known/public-key.pem").permitAll()
 						.requestMatchers(HttpMethod.GET,"/api/v1/public_route").permitAll()
-						.requestMatchers("/api/v1/auth/**").permitAll()
+						.requestMatchers(HttpMethod.POST,
+								"/api/v1/auth/login",
+								"/api/v1/auth/refresh-token",
+								"/api/v1/auth/signup").permitAll()
 						.anyRequest()
 						.authenticated())
 				.exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
@@ -69,11 +79,20 @@ public class SecurityConfig {
 	@Bean
 	CorsConfigurationSource corsConfigurationSource() {
 		CorsConfiguration config = new CorsConfiguration();
-		// Dev-friendly defaults. If you need credentials, replace "*" with explicit origins.
-		config.setAllowedOriginPatterns(List.of("*"));
+
+		List<String> patterns;
+		if (allowedOriginPatternsProp != null && !allowedOriginPatternsProp.isBlank()) {
+			patterns = Arrays.stream(allowedOriginPatternsProp.split(","))
+					.map(String::trim)
+					.filter(s -> !s.isEmpty())
+					.collect(Collectors.toList());
+		} else {
+			throw new IllegalArgumentException("app.cors.allowed-origin-patterns is not set");
+		}
+		config.setAllowedOriginPatterns(patterns);
 		config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 		config.setAllowedHeaders(List.of("*"));
-		config.setExposedHeaders(Arrays.asList("Authorization", "Refresh-Token"));
+		config.setExposedHeaders(Arrays.asList("Authorization"));
 		config.setAllowCredentials(false);
 		config.setMaxAge(3600L);
 

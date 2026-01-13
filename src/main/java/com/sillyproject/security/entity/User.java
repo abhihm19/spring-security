@@ -1,7 +1,6 @@
 package com.sillyproject.security.entity;
 
 import java.time.LocalDateTime;
-import java.util.Collection;
 import java.util.List;
 
 import jakarta.persistence.*;
@@ -28,6 +27,13 @@ public class User {
 	private String email;
 	@Column(nullable = false)
 	private String password;
+
+	/**
+	 * Increment to invalidate all previously-issued access tokens for this user.
+	 * Access tokens carry a "ver" claim and are rejected if it doesn't match this value.
+	 */
+	@Column(nullable = false)
+	private int tokenVersion = 0;
 
 	@OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
 	private List<UserRole> roleMappings;

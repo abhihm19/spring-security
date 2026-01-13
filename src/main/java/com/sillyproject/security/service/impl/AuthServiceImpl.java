@@ -1,13 +1,13 @@
 package com.sillyproject.security.service.impl;
 
 import com.sillyproject.security.entity.RefreshToken;
-import com.sillyproject.security.entity.Role;
 import com.sillyproject.security.entity.User;
 import com.sillyproject.security.entity.UserRole;
 import com.sillyproject.security.pojo.LoginRequest;
 import com.sillyproject.security.pojo.LoginResponse;
 import com.sillyproject.security.pojo.SignupRequest;
 import com.sillyproject.security.pojo.TokenRefreshResponse;
+import com.sillyproject.security.pojo.ChangePasswordRequest;
 import com.sillyproject.security.repository.RefreshTokenRepository;
 import com.sillyproject.security.repository.RoleRepository;
 import com.sillyproject.security.repository.UserRepository;
@@ -17,6 +17,7 @@ import com.sillyproject.security.security.TokenHashingService;
 import com.sillyproject.security.service.AuthService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -88,7 +89,7 @@ public class AuthServiceImpl implements AuthService {
 
         // Always mint tokens with the canonical username (not the login identifier),
         // otherwise refresh-token ownership checks can fail when logging in with email.
-        String accessToken = jwtTokenProvider.generateAccessToken(username);
+        String accessToken = jwtTokenProvider.generateAccessToken(username, user.getTokenVersion());
         String refreshToken = jwtTokenProvider.generateRefreshToken(username);
         RefreshToken refreshTokenObj = buildRefreshTokenObject(refreshToken, user);
         refreshTokenRepository.save(refreshTokenObj);
@@ -125,15 +126,24 @@ public class AuthServiceImpl implements AuthService {
         String username = jwtTokenProvider.getUsername(refreshToken);
         String refreshTokenHash = tokenHashingService.hash(refreshToken);
 
-        // Validate refresh token exists in database and is not revoked
+        // Validate refresh token exists in database
         Optional<RefreshToken> refreshTokenEntity = refreshTokenRepository.findByTokenHash(refreshTokenHash);
-        if (refreshTokenEntity.isEmpty() || refreshTokenEntity.get().isRevoked()) {
-            log.warn("Invalid or revoked refresh token for user: {}", username);
-            throw new Exception("Invalid or revoked refresh token");
+        if (refreshTokenEntity.isEmpty()) {
+            log.warn("Refresh token not found in DB for user: {}", username);
+            throw new Exception("Invalid refresh token");
+        }
+
+        RefreshToken current = refreshTokenEntity.get();
+
+        // Reuse detection: a revoked refresh token being presented again is a strong theft signal.
+        if (current.isRevoked()) {
+            log.warn("Refresh token reuse detected for user: {}. Revoking all sessions.", username);
+            revokeAllRefreshTokens(current.getUser());
+            throw new Exception("Invalid refresh token");
         }
 
         // Verify token belongs to the user
-        if (!refreshTokenEntity.get().getUser().getUsername().equals(username)) {
+        if (!current.getUser().getUsername().equals(username)) {
             log.warn("Token mismatch - token belongs to different user");
             throw new Exception("Token does not belong to user");
         }
@@ -141,20 +151,31 @@ public class AuthServiceImpl implements AuthService {
         // Rotate refresh token on every successful refresh:
         // - revoke the presented refresh token
         // - mint a new refresh token and persist its hash
-        RefreshToken current = refreshTokenEntity.get();
         current.setRevoked(true);
         current.setRevokedAt(new Date());
         refreshTokenRepository.save(current);
 
-        String newAccessToken = jwtTokenProvider.generateAccessToken(username);
-        String newRefreshToken = jwtTokenProvider.generateRefreshToken(username);
+        String newAccessToken = jwtTokenProvider.generateAccessToken(username, current.getUser().getTokenVersion());
+        // Absolute session lifetime: do NOT extend beyond the current refresh token's expiry.
+        String newRefreshToken = jwtTokenProvider.generateRefreshToken(username, current.getExpiryDate());
 
-        User user = current.getUser();
-        RefreshToken newRefreshEntity = buildRefreshTokenObject(newRefreshToken, user);
+        RefreshToken newRefreshEntity = buildRefreshTokenObject(newRefreshToken, current.getUser());
         refreshTokenRepository.save(newRefreshEntity);
 
         log.info("Rotated refresh token and generated new access token for user: {}", username);
         return new TokenRefreshResponse(newAccessToken, newRefreshToken);
+    }
+
+    private void revokeAllRefreshTokens(User user) {
+        List<RefreshToken> tokens = refreshTokenRepository.findByUser(user);
+        Date now = new Date();
+        for (RefreshToken token : tokens) {
+            if (!token.isRevoked()) {
+                token.setRevoked(true);
+                token.setRevokedAt(now);
+                refreshTokenRepository.save(token);
+            }
+        }
     }
 
     @Override
@@ -174,21 +195,19 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void logoutAllSessions(String username) {
-        Optional<User> user = userRepository.findByUsername(username);
-        if (user.isPresent()) {
-            List<RefreshToken> tokens = refreshTokenRepository.findByUser(user.get());
-            int revokedCount = 0;
-            for (RefreshToken token : tokens) {
-                if (!token.isRevoked()) {
-                    token.setRevoked(true);
-                    refreshTokenRepository.save(token);
-                    revokedCount++;
-                }
-            }
-            log.info("All sessions revoked for user: {} ({} sessions)", username, revokedCount);
-        } else {
-            log.warn("Attempt to logout all sessions for non-existent user: {}", username);
-        }
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Invalidate all access tokens immediately
+        user.setTokenVersion(user.getTokenVersion() + 1);
+        user.setLastUpdatedBy(0);
+        user.setLastUpdatedDate(LocalDateTime.now());
+        userRepository.save(user);
+
+        // Revoke all refresh sessions so no new access tokens can be minted
+        revokeAllRefreshTokens(user);
+
+        log.info("All sessions revoked for user: {}", username);
     }
 
     @Override
@@ -220,23 +239,11 @@ public class AuthServiceImpl implements AuthService {
 
         user = userRepository.save(user);
 
-        // Assign default role "USER" if it exists, otherwise create it
-        Role defaultRole = roleRepository.findByName("USER")
-                .orElseGet(() -> {
-                    Role role = new Role();
-                    role.setName("USER");
-                    role.setActive(true);
-                    role.setCreatedBy(0);
-                    role.setCreationDate(LocalDateTime.now());
-                    role.setLastUpdatedBy(0);
-                    role.setLastUpdatedDate(LocalDateTime.now());
-                    return roleRepository.save(role);
-                });
 
         // Create user role mapping
         UserRole userRole = new UserRole();
         userRole.setUser(user);
-        userRole.setRole(defaultRole);
+        userRole.setRole(roleRepository.findByName("USER").orElseThrow(() -> new IllegalArgumentException("Role not found")));
         userRole.setEffectiveStartDate(LocalDateTime.now());
         userRole.setEffectiveEndDate(LocalDateTime.now().plusYears(100)); // Set far future date
         userRole.setCreatedBy(0);
@@ -246,5 +253,36 @@ public class AuthServiceImpl implements AuthService {
 
         userRoleRepository.save(userRole);
         log.info("User successfully registered: {}", signupRequest.getUsername());
+    }
+
+    @Override
+    public void changePassword(String username, ChangePasswordRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Request is required");
+        }
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new BadCredentialsException("Invalid current password");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        user.setTokenVersion(user.getTokenVersion() + 1); // invalidates all existing access tokens
+        user.setLastUpdatedBy(0);
+        user.setLastUpdatedDate(LocalDateTime.now());
+        userRepository.save(user);
+
+        // Revoke all refresh tokens so no new access tokens can be minted using old sessions.
+        revokeAllRefreshTokens(user);
+
+        log.info("Password changed and sessions revoked for user: {}", username);
+    }
+
+    @Override
+    public void logoutCurrentUser(String username) {
+        // In this system, "logout current user" is implemented as "logout all sessions"
+        // because access tokens are stateless and we invalidate them via tokenVersion.
+        logoutAllSessions(username);
     }
 }

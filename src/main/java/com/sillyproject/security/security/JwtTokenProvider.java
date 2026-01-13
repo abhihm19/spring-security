@@ -1,59 +1,92 @@
 package com.sillyproject.security.security;
 
-import java.nio.charset.StandardCharsets;
-import java.security.Key;
-import java.util.UUID;
-import java.util.Date;
 import java.util.Base64;
-
-import javax.crypto.SecretKey;
+import java.util.Date;
+import java.util.Map;
+import java.util.UUID;
 
 import io.jsonwebtoken.Claims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 
 @Component
 public class JwtTokenProvider {
 	
 	private static final Logger log = LoggerFactory.getLogger(JwtTokenProvider.class);
-	
-	@Value("${app.jwt.secret}")
-	private String jwtSecret;
 
-	@Value("${access.token.validity}")
-	private long accessTokenValidity;
+	private final JwtKeyStoreProvider keyStoreProvider;
+	private final ObjectMapper objectMapper;
+	private final long accessTokenValidity;
+	private final long refreshTokenValidity;
+	private final String jwtIssuer;
+	private final String jwtAudience;
 
-	@Value("${refresh.token.validity}")
-	private long refreshTokenValidity;
+	public JwtTokenProvider(
+			JwtKeyStoreProvider keyStoreProvider,
+			ObjectMapper objectMapper,
+			org.springframework.core.env.Environment env) {
+		this.keyStoreProvider = keyStoreProvider;
+		this.objectMapper = objectMapper;
+		this.accessTokenValidity = Long.parseLong(env.getProperty("access.token.validity", "1800000"));
+		this.refreshTokenValidity = Long.parseLong(env.getProperty("refresh.token.validity", "604800000"));
+		this.jwtIssuer = env.getProperty("app.jwt.issuer", "");
+		this.jwtAudience = env.getProperty("app.jwt.audience", "");
+	}
 
 	public String generateAccessToken(String username) {
-		return Jwts.builder()
+		return generateAccessToken(username, 0);
+	}
+
+	public String generateAccessToken(String username, int tokenVersion) {
+		var builder = Jwts.builder()
+				.header().keyId(keyStoreProvider.getActiveKid()).and()
 				.subject(username)
 				.claim("type", "access")
+				.claim("ver", tokenVersion)
+				.id(UUID.randomUUID().toString())
 				.issuedAt(new Date())
-				.expiration(new Date(System.currentTimeMillis() + accessTokenValidity))
-				.signWith(key())
-				.compact();
+				.expiration(new Date(System.currentTimeMillis() + accessTokenValidity));
+
+		if (jwtIssuer != null && !jwtIssuer.isBlank()) {
+			builder.issuer(jwtIssuer);
+		}
+		if (jwtAudience != null && !jwtAudience.isBlank()) {
+			builder.audience().add(jwtAudience).and();
+		}
+
+		return builder.signWith(keyStoreProvider.getActivePrivateKey(), Jwts.SIG.RS256).compact();
 	}
 
 	public String generateRefreshToken(String username) {
-		return Jwts.builder()
+		return generateRefreshToken(username, new Date(System.currentTimeMillis() + refreshTokenValidity));
+	}
+
+	/**
+	 * Generate a refresh token with an explicit expiration time. This enables "absolute session lifetime"
+	 * rotation (rotated refresh tokens do not extend the session beyond its original expiry).
+	 */
+	public String generateRefreshToken(String username, Date expiresAt) {
+		var builder = Jwts.builder()
+				.header().keyId(keyStoreProvider.getActiveKid()).and()
 				.subject(username)
 				.claim("type", "refresh")
 				.id(UUID.randomUUID().toString())
 				.issuedAt(new Date())
-				.expiration(new Date(System.currentTimeMillis() + refreshTokenValidity))
-				.signWith(key())
-				.compact();
-	}
-	
-	private Key key() {
-		return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+				.expiration(expiresAt);
+
+		if (jwtIssuer != null && !jwtIssuer.isBlank()) {
+			builder.issuer(jwtIssuer);
+		}
+		if (jwtAudience != null && !jwtAudience.isBlank()) {
+			builder.audience().add(jwtAudience).and();
+		}
+
+		return builder.signWith(keyStoreProvider.getActivePrivateKey(), Jwts.SIG.RS256).compact();
 	}
 
 	public String getUsername(String token) {
@@ -90,6 +123,14 @@ public class JwtTokenProvider {
 
 	public Date getExpirationDate(String token) {
 		return parseClaims(token).getExpiration();
+	}
+
+	public Integer getTokenVersion(String token) {
+		try {
+			return parseClaims(token).get("ver", Integer.class);
+		} catch (Exception ex) {
+			return null;
+		}
 	}
 
 	public boolean validateToken(String token, String expectedType) {
@@ -129,6 +170,14 @@ public class JwtTokenProvider {
 
 			String tokenType = claims.get("type", String.class);
 			boolean isValid = tokenType != null && tokenType.equals(expectedType) && !isTokenExpired(claims);
+
+			// Optional issuer/audience enforcement (recommended in production)
+			if (isValid && jwtIssuer != null && !jwtIssuer.isBlank()) {
+				isValid = jwtIssuer.equals(claims.getIssuer());
+			}
+			if (isValid && jwtAudience != null && !jwtAudience.isBlank()) {
+				isValid = claims.getAudience() != null && claims.getAudience().contains(jwtAudience);
+			}
 			
 			if (!isValid) {
 				log.warn("Token validation failed - type mismatch or expired. Expected type: {}, Actual type: {}", 
@@ -178,11 +227,32 @@ public class JwtTokenProvider {
 	}
 
 	private Claims parseClaims(String token) {
+		String kid = extractKid(token);
+		java.security.PublicKey verificationKey = keyStoreProvider.getPublicKey(kid);
+		if (verificationKey == null) {
+			throw new io.jsonwebtoken.security.SecurityException("Unknown kid");
+		}
 		return Jwts.parser()
-				.verifyWith((SecretKey) key())
+				.verifyWith(verificationKey)
 				.build()
 				.parseSignedClaims(token)
 				.getPayload();
+	}
+
+	private String extractKid(String token) {
+		try {
+			String[] parts = token.split("\\.", -1);
+			if (parts.length != 3) {
+				throw new IllegalArgumentException("Invalid JWT structure");
+			}
+			byte[] headerBytes = base64UrlDecode(parts[0]);
+			@SuppressWarnings("unchecked")
+			Map<String, Object> header = objectMapper.readValue(headerBytes, Map.class);
+			Object kid = header.get("kid");
+			return kid == null ? null : kid.toString();
+		} catch (Exception e) {
+			throw new io.jsonwebtoken.security.SecurityException("Unable to parse token header", e);
+		}
 	}
 
 }

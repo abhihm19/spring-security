@@ -67,9 +67,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			
 			// get username from token (parser verifies signature again)
 			String username = jwtTokenProvider.getUsername(token);
+			Integer tokenVersionClaim = jwtTokenProvider.getTokenVersion(token);
 			
 			UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 			log.debug("JWT Filter - Loaded user details for: {}", userDetails.getUsername());
+
+			// Immediate invalidation after password change/logout: reject tokens with an old version.
+			if (userDetails instanceof UserPrincipal userPrincipal) {
+				int currentVersion = userPrincipal.getTokenVersion();
+				if (tokenVersionClaim == null || tokenVersionClaim.intValue() != currentVersion) {
+					log.debug("JWT Filter - Token version mismatch for user {} (token ver={}, current ver={})",
+							username, tokenVersionClaim, currentVersion);
+					SecurityContextHolder.clearContext();
+					filterChain.doFilter(request, response);
+					return;
+				}
+			}
 			
 			UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(
 					userDetails,

@@ -58,11 +58,12 @@ public class CustomUserDetailsService implements UserDetailsService {
 			user.getUsername(), 
 			authorities.stream().map(GrantedAuthority::getAuthority).collect(Collectors.toList()));
 
-		return new org.springframework.security.core.userdetails.User(
-        		user.getUsername(),
-        		user.getPassword(),
+		return new UserPrincipal(
+				user.getUsername(),
+				user.getPassword(),
+				user.getTokenVersion(),
 				authorities
-                );
+		);
 	}
 
 }
